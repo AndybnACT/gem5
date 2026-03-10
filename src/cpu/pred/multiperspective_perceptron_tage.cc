@@ -205,33 +205,40 @@ MPP_TAGE::updateHistories(ThreadID tid, Addr branch_pc, bool speculative,
                           bool taken, Addr target, const StaticInstPtr &inst,
                           TAGEBase::BranchInfo* bi)
 {
-    if (speculative != speculativeHistUpdate) {
-        return;
-    }
-    // speculation is not implemented
-    assert(! speculative);
+    // Delegate entirely to the base class which handles the
+    // speculative/non-speculative split, recordHistState, restoreHistState,
+    // and then calls our updatePathAndGlobalHistory override below.
+    TAGEBase::updateHistories(tid, branch_pc, speculative, taken, target, inst,
+                              bi);
+}
 
-    int brtype = inst->isDirectCtrl() ? 0 : 2;
-    if (! inst->isUncondCtrl()) {
-        ++brtype;
-    }
+void
+MPP_TAGE::updatePathAndGlobalHistory(ThreadID tid, int brtype, bool taken,
+                                     Addr branch_pc, Addr target,
+                                     TAGEBase::BranchInfo *bi)
+{
+    // MPP-specific path and global history update, extracted from the
+    // old non-speculative-only updateHistories so that TAGEBase can call
+    // it from both the speculative and non-speculative paths.
+    ThreadHistory &tHist = threadHistory[tid];
 
-    // TAGE update
+    // Update path history: MPP uses up to 4 path bits for conditional
+    // branches (brtype & 1 == 1) or just 1 bit for unconditional.
     int tmp = (branch_pc << 1) + taken;
     int path = branch_pc;
-
     int maxt = (brtype & 1) ? 1 : 4;
 
-    // Update path history
     for (int t = 0; t < maxt; t++) {
         int pathbit = (path & 127);
         path >>= 1;
-        threadHistory[tid].pathHist
-                        = (threadHistory[tid].pathHist << 1) ^ pathbit;
+        tHist.pathHist = (tHist.pathHist << 1) ^ pathbit;
     }
 
-    // Update global history
-    updateGHist(tid, tmp, maxt);
+    // Update global history: shift (branch_pc << 1) + taken into GHR.
+    // maxt bits are pushed, matching the path history update width above.
+    bi->ghist = tmp;
+    bi->nGhist = maxt;
+    updateGHist(tid, bi->ghist, bi->nGhist);
 }
 
 bool
@@ -381,10 +388,7 @@ MultiperspectivePerceptronTAGE::MultiperspectivePerceptronTAGE(
   : MultiperspectivePerceptron(p), tage(p.tage),
     loopPredictor(p.loop_predictor),
     statisticalCorrector(p.statistical_corrector)
-{
-    fatal_if(tage->isSpeculativeUpdateEnabled(),
-        "Speculative updates support is not implemented");
-}
+{}
 
 void
 MultiperspectivePerceptronTAGE::init()
@@ -680,14 +684,28 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
 {
     assert(uncond || bp_history);
 
-    // For perceptron there is no speculative history correction.
-    // Conditional branches are done.
-    if (!uncond) return;
+    if (!uncond) {
+        // Conditional branch: bp_history was set by lookup() to
+        // MPPTAGEBranchInfo which carries tageBranchInfo.
+        // Speculatively update TAGE global history with the predicted
+        // direction. TAGEBase::updateHistories with speculative=true:
+        //   1. recordHistState() snapshots pathHist + folded histories
+        //      into tageBranchInfo (only on first call, !bi->modified)
+        //   2. restoreHistState() if bi->modified (handles re-prediction)
+        //   3. calls updatePathAndGlobalHistory() (our override above)
+        //   4. sets bi->modified = true
+        MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo *>(bp_history);
+        tage->updateHistories(tid, pc, true /*speculative*/, taken, target,
+                              inst, bi->tageBranchInfo);
+        return;
+    }
 
     MPPTAGEBranchInfo *bi =
         new MPPTAGEBranchInfo(pc, pcshift, false, *tage, *loopPredictor,
                               *statisticalCorrector);
     bp_history = (void *) bi;
+    tage->updateHistories(tid, pc, true /*speculative*/, true /*always taken*/,
+                          target, inst, bi->tageBranchInfo);
 }
 
 void
@@ -695,6 +713,15 @@ MultiperspectivePerceptronTAGE::squash(ThreadID tid, void * &bp_history)
 {
     assert(bp_history);
     MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bp_history);
+
+    // Restore the TAGE global history to the state before this branch
+    // was predicted. Without this, a wrong-path branch's speculative
+    // history update would permanently corrupt the GHR.
+    if (tage->isSpeculativeUpdateEnabled()) {
+        tage->restoreHistState(tid, bi->tageBranchInfo);
+        loopPredictor->squash(tid, bi->lpBranchInfo);
+    }
+
     delete bi;
     bp_history = nullptr;
 }
