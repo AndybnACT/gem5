@@ -1108,6 +1108,23 @@ class MultiperspectivePerceptronTAGE64KB(MultiperspectivePerceptronTAGE):
     statistical_corrector = MPP_StatisticalCorrector_64KB()
 
 
+class MultiperspectivePerceptronTAGE192KB(MultiperspectivePerceptronTAGE):
+    type = "MultiperspectivePerceptronTAGE192KB"
+    cxx_class = "gem5::branch_prediction::MultiperspectivePerceptronTAGE192KB"
+    cxx_header = "cpu/pred/multiperspective_perceptron_tage_192KB.hh"
+
+    # 1. Update the overall hardware budget
+    budgetbits = 192 * 1024 * 8  # 1,572,864 bits
+
+    # 2. CRITICAL: Enable Speculative Update
+    speculativeHistUpdate = True
+
+    # 3. TAGE-SC-L Components (Keep these exactly the same as the 64KB version)
+    tage = MPP_TAGE()
+    loop_predictor = MPP_LoopPredictor()
+    statistical_corrector = MPP_StatisticalCorrector_64KB()
+
+
 class MPP_TAGE_8KB(MPP_TAGE):
     type = "MPP_TAGE_8KB"
     cxx_class = "gem5::branch_prediction::MPP_TAGE_8KB"
