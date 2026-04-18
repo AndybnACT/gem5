@@ -398,6 +398,7 @@ StatisticalCorrector::scRestoreHistState(BranchInfo *bi)
     }
     scHistory->bwHist = bi->bwHist;
     scHistory->imliCount = bi->imliCount;
+    scHistory->pHist = bi->pHist;
     scHistory->setLocalHistory(1, bi->pc, bi->localHistories[1]);
     return true;
 }

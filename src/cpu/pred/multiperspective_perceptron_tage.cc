@@ -276,6 +276,8 @@ MPP_StatisticalCorrector::MPP_StatisticalCorrector(
     initGEHLTable(pnb, pm, pgehl, logPnb, wp, -1);
     initGEHLTable(gnb, gm, ggehl, logGnb, wg, -1);
 
+    warn("speculativeHistUpdate = %d", speculativeHistUpdate);
+
     for (int8_t &pos : wl) {
         pos = -1;
     }
@@ -592,6 +594,48 @@ MPP_StatisticalCorrector::condBranchUpdate(ThreadID tid, Addr branch_pc,
     }
 }
 
+StatisticalCorrector::BranchInfo *MPP_StatisticalCorrector::makeBranchInfo()
+{
+    return new MPP_StatisticalCorrector::BranchInfo();
+}
+
+void MPP_StatisticalCorrector::scRecordHistState(Addr branch_pc, StatisticalCorrector::BranchInfo *bi)
+{
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+    static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
+    assert(mbi->magic == MPP_StatisticalCorrector::BranchInfo::MAGIC);
+    
+    StatisticalCorrector::scRecordHistState(branch_pc, bi);   // base fields
+
+    MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
+
+    mbi->globalHist = sh->globalHist;
+
+    mbi->historyStackPointer   = sh->getPointer();
+    mbi->historyStackEntry     = sh->historyStack[sh->getPointer()];
+    unsigned next = (sh->getPointer() + 1) % sh->historyStack.size();
+    mbi->historyStackEntryNext = sh->historyStack[next];
+}
+
+bool MPP_StatisticalCorrector::scRestoreHistState(StatisticalCorrector::BranchInfo *bi)
+{
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+    static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
+    assert(mbi->magic == MPP_StatisticalCorrector::BranchInfo::MAGIC);
+    
+    if (!StatisticalCorrector::scRestoreHistState(bi)) return false;  // base fields + pHist fix
+
+    MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
+
+    sh->globalHist = mbi->globalHist;
+
+    sh->historyStackPointer = mbi->historyStackPointer;
+    sh->historyStack[mbi->historyStackPointer] = mbi->historyStackEntry;
+    unsigned next = (mbi->historyStackPointer + 1) % sh->historyStack.size();
+    sh->historyStack[next] = mbi->historyStackEntryNext;
+    return true;
+}
+
 void
 MultiperspectivePerceptronTAGE::update(ThreadID tid, Addr pc, bool taken,
                                    void * &bp_history, bool squashed,
@@ -609,6 +653,9 @@ MultiperspectivePerceptronTAGE::update(ThreadID tid, Addr pc, bool taken,
             if (bi->tageBranchInfo->condBranch) {
                 loopPredictor->squashLoop(bi->lpBranchInfo);
             }
+            statisticalCorrector->updateHistories(pc, true, inst, taken,
+                                                  bi->scBranchInfo, target,
+                                                  tage->getPathHist(tid));
         }
         return;
     }
@@ -697,6 +744,9 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
         MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo *>(bp_history);
         tage->updateHistories(tid, pc, true /*speculative*/, taken, target,
                               inst, bi->tageBranchInfo);
+        statisticalCorrector->updateHistories(pc, true, inst, taken,
+                                              bi->scBranchInfo, target,
+                                              tage->getPathHist(tid));
         return;
     }
 
@@ -706,6 +756,9 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
     bp_history = (void *) bi;
     tage->updateHistories(tid, pc, true /*speculative*/, true /*always taken*/,
                           target, inst, bi->tageBranchInfo);
+    statisticalCorrector->updateHistories(pc, true, inst, true,
+                                          bi->scBranchInfo, target,
+                                          tage->getPathHist(tid));
 }
 
 void
@@ -720,6 +773,7 @@ MultiperspectivePerceptronTAGE::squash(ThreadID tid, void * &bp_history)
     if (tage->isSpeculativeUpdateEnabled()) {
         tage->restoreHistState(tid, bi->tageBranchInfo);
         loopPredictor->squash(tid, bi->lpBranchInfo);
+        statisticalCorrector->scRestoreHistState(bi->scBranchInfo);
     }
 
     delete bi;

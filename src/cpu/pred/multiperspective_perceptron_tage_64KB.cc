@@ -66,7 +66,7 @@ MPP_StatisticalCorrector_64KB::makeThreadHistory()
 {
     MPP_SCThreadHistory *sh = new MPP_SCThreadHistory(instShiftAmt);
 
-    sh->setNumOrdinalHistories(3);
+    sh->setNumOrdinalHistories(4);
     sh->initLocalHistory(1, numEntriesFirstLocalHistories, 4);
     sh->initLocalHistory(2, numEntriesSecondLocalHistories, 5);
     sh->initLocalHistory(3, numEntriesThirdLocalHistories, 3);
@@ -161,6 +161,37 @@ MPP_StatisticalCorrector_64KB::scHistoryUpdate(Addr branch_pc,
 
     StatisticalCorrector::scHistoryUpdate(branch_pc, inst, taken,
                                           corrTarget, phist);
+}
+
+void
+MPP_StatisticalCorrector_64KB::scRecordHistState(Addr branch_pc,
+                                                 StatisticalCorrector::BranchInfo *bi)
+{
+    MPP_StatisticalCorrector::scRecordHistState(branch_pc, bi);  // handles globalHist + stack
+
+    MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+        static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
+
+    // Only safe here because makeThreadHistory() initializes ordinals 2 and 3
+    mbi->localHistories[2] = sh->getLocalHistory(2, branch_pc);
+    mbi->localHistories[3] = sh->getLocalHistory(3, branch_pc);
+}
+
+bool
+MPP_StatisticalCorrector_64KB::scRestoreHistState(
+    StatisticalCorrector::BranchInfo *bi)
+{
+    if (!MPP_StatisticalCorrector::scRestoreHistState(bi)) return false;
+
+    MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+        static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
+
+    sh->setLocalHistory(2, mbi->pc, mbi->localHistories[2]);
+    sh->setLocalHistory(3, mbi->pc, mbi->localHistories[3]);
+
+    return true;
 }
 
 size_t

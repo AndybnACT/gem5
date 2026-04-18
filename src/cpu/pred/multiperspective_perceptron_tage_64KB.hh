@@ -77,6 +77,8 @@ class MPP_StatisticalCorrector_64KB : public MPP_StatisticalCorrector
             StatisticalCorrector::BranchInfo *bi) override;
     void scHistoryUpdate(Addr branch_pc, const StaticInstPtr &inst, bool taken,
             Addr corrTarget, int64_t phist) override;
+    void scRecordHistState(Addr branch_pc, StatisticalCorrector::BranchInfo *bi) override;
+    bool scRestoreHistState(StatisticalCorrector::BranchInfo *bi) override;
   public:
     MPP_StatisticalCorrector_64KB(
             const MPP_StatisticalCorrector_64KBParams &p);
