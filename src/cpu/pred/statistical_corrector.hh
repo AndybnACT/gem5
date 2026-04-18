@@ -207,7 +207,7 @@ class StatisticalCorrector : public SimObject
     // Enable speculative updates of the SC histories
     const bool speculativeHistUpdate;
     // Maximum number of ordinal histories
-    static const int MaxOrdinalHistories = 5;
+    static const int MaxOrdinalHistories = 4;
 
     int8_t firstH;
     int8_t secondH;

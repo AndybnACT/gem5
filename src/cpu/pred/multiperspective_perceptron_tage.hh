@@ -173,18 +173,21 @@ class MPP_StatisticalCorrector : public StatisticalCorrector
   public:
     struct BranchInfo : public StatisticalCorrector::BranchInfo
     {
-        static constexpr uint64_t MAGIC = 0xDEADBEEFCAFEBABEULL;
-        uint64_t magic = MAGIC;
-        unsigned int historyStackPointer;
-        int64_t      historyStackEntry;
-        int64_t      historyStackEntryNext;
-        ~BranchInfo()
+        // Snapshot of MPP-specific SC state, used to roll back a
+        // speculative update on a squash.
+        int64_t globalHist = 0;
+        unsigned int historyStackPointer = 0;
+        int64_t historyStackEntry = 0;
+        int64_t historyStackEntryNext = 0;
+
+        virtual ~BranchInfo()
         {}
     };
     MPP_StatisticalCorrector(const MPP_StatisticalCorrectorParams &p);
 
     StatisticalCorrector::BranchInfo *makeBranchInfo() override;
-    void scRecordHistState(Addr branch_pc, StatisticalCorrector::BranchInfo *bi) override;
+    void scRecordHistState(Addr branch_pc,
+            StatisticalCorrector::BranchInfo *bi) override;
     bool scRestoreHistState(StatisticalCorrector::BranchInfo *bi) override;
     void initBias() override;
     unsigned getIndBias(Addr branch_pc, StatisticalCorrector::BranchInfo* bi,

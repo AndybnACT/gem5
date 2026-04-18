@@ -276,8 +276,6 @@ MPP_StatisticalCorrector::MPP_StatisticalCorrector(
     initGEHLTable(pnb, pm, pgehl, logPnb, wp, -1);
     initGEHLTable(gnb, gm, ggehl, logGnb, wg, -1);
 
-    warn("speculativeHistUpdate = %d", speculativeHistUpdate);
-
     for (int8_t &pos : wl) {
         pos = -1;
     }
@@ -594,41 +592,42 @@ MPP_StatisticalCorrector::condBranchUpdate(ThreadID tid, Addr branch_pc,
     }
 }
 
-StatisticalCorrector::BranchInfo *MPP_StatisticalCorrector::makeBranchInfo()
+StatisticalCorrector::BranchInfo *
+MPP_StatisticalCorrector::makeBranchInfo()
 {
     return new MPP_StatisticalCorrector::BranchInfo();
 }
 
-void MPP_StatisticalCorrector::scRecordHistState(Addr branch_pc, StatisticalCorrector::BranchInfo *bi)
+void
+MPP_StatisticalCorrector::scRecordHistState(Addr branch_pc,
+        StatisticalCorrector::BranchInfo *bi)
 {
-    MPP_StatisticalCorrector::BranchInfo *mbi =
-    static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
-    assert(mbi->magic == MPP_StatisticalCorrector::BranchInfo::MAGIC);
-    
-    StatisticalCorrector::scRecordHistState(branch_pc, bi);   // base fields
+    StatisticalCorrector::scRecordHistState(branch_pc, bi);
 
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+        static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
     MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
 
     mbi->globalHist = sh->globalHist;
-
-    mbi->historyStackPointer   = sh->getPointer();
-    mbi->historyStackEntry     = sh->historyStack[sh->getPointer()];
+    mbi->historyStackPointer = sh->getPointer();
+    mbi->historyStackEntry = sh->historyStack[sh->getPointer()];
     unsigned next = (sh->getPointer() + 1) % sh->historyStack.size();
     mbi->historyStackEntryNext = sh->historyStack[next];
 }
 
-bool MPP_StatisticalCorrector::scRestoreHistState(StatisticalCorrector::BranchInfo *bi)
+bool
+MPP_StatisticalCorrector::scRestoreHistState(
+        StatisticalCorrector::BranchInfo *bi)
 {
-    MPP_StatisticalCorrector::BranchInfo *mbi =
-    static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
-    assert(mbi->magic == MPP_StatisticalCorrector::BranchInfo::MAGIC);
-    
-    if (!StatisticalCorrector::scRestoreHistState(bi)) return false;  // base fields + pHist fix
+    if (!StatisticalCorrector::scRestoreHistState(bi)) {
+        return false;
+    }
 
+    MPP_StatisticalCorrector::BranchInfo *mbi =
+        static_cast<MPP_StatisticalCorrector::BranchInfo *>(bi);
     MPP_SCThreadHistory *sh = static_cast<MPP_SCThreadHistory *>(scHistory);
 
     sh->globalHist = mbi->globalHist;
-
     sh->historyStackPointer = mbi->historyStackPointer;
     sh->historyStack[mbi->historyStackPointer] = mbi->historyStackEntry;
     unsigned next = (mbi->historyStackPointer + 1) % sh->historyStack.size();
@@ -732,17 +731,8 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
     assert(uncond || bp_history);
 
     if (!uncond) {
-        // Conditional branch: bp_history was set by lookup() to
-        // MPPTAGEBranchInfo which carries tageBranchInfo.
-        // Speculatively update TAGE global history with the predicted
-        // direction. TAGEBase::updateHistories with speculative=true:
-        //   1. recordHistState() snapshots pathHist + folded histories
-        //      into tageBranchInfo (only on first call, !bi->modified)
-        //   2. restoreHistState() if bi->modified (handles re-prediction)
-        //   3. calls updatePathAndGlobalHistory() (our override above)
-        //   4. sets bi->modified = true
         MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo *>(bp_history);
-        tage->updateHistories(tid, pc, true /*speculative*/, taken, target,
+        tage->updateHistories(tid, pc, true, taken, target,
                               inst, bi->tageBranchInfo);
         statisticalCorrector->updateHistories(pc, true, inst, taken,
                                               bi->scBranchInfo, target,
@@ -754,7 +744,7 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
         new MPPTAGEBranchInfo(pc, pcshift, false, *tage, *loopPredictor,
                               *statisticalCorrector);
     bp_history = (void *) bi;
-    tage->updateHistories(tid, pc, true /*speculative*/, true /*always taken*/,
+    tage->updateHistories(tid, pc, true, true /* always taken */,
                           target, inst, bi->tageBranchInfo);
     statisticalCorrector->updateHistories(pc, true, inst, true,
                                           bi->scBranchInfo, target,
@@ -767,9 +757,10 @@ MultiperspectivePerceptronTAGE::squash(ThreadID tid, void * &bp_history)
     assert(bp_history);
     MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bp_history);
 
-    // Restore the TAGE global history to the state before this branch
-    // was predicted. Without this, a wrong-path branch's speculative
-    // history update would permanently corrupt the GHR.
+    // Wrong-path branch: restore the speculatively updated state in
+    // each sub-predictor so that the GHR, pathHist, SC histories, and
+    // loop predictor state roll back to the pre-prediction snapshot
+    // stored in bi.
     if (tage->isSpeculativeUpdateEnabled()) {
         tage->restoreHistState(tid, bi->tageBranchInfo);
         loopPredictor->squash(tid, bi->lpBranchInfo);
