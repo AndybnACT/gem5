@@ -229,6 +229,14 @@ class StatisticalCorrector : public SimObject
               globalHist(0), imHist(0)
         {}
 
+        // Derived classes add their own members and override scRecord/
+        // RestoreHistState. The destructor must be virtual so that
+        // `delete scBranchInfo` through a BranchInfo* base pointer
+        // frees the correct (most-derived) object; without it, deleting
+        // a derived instance that introduces a vptr frees a pointer
+        // that is offset past the allocation and triggers a bad free.
+        virtual ~BranchInfo() = default;
+
         // confidences calculated on tage and used on the statistical
         // correction
         bool lowConf;
